@@ -11,10 +11,10 @@ impl<V> Map<V> {
         }
     }
 
-    fn put(&mut self, k: Key, v: V) {
+    fn put(&mut self, k: &Key, v: V) {
         let mut cur_node = &mut self.head;
-        for c in k.0.chars() {
-            let idx = c as usize;
+        for b in k.0.bytes() {
+            let idx = b as usize;
             if cur_node.children[idx].is_none() {
                 let new_node = Node::<V>::default();
                 cur_node.children[idx] = Some(Box::new(new_node));
@@ -26,8 +26,8 @@ impl<V> Map<V> {
 
     fn get<'a>(&'a self, k: &Key) -> Option<&'a V> {
         let mut cur_node = &self.head;
-        for c in k.0.chars() {
-            let idx = c as usize;
+        for b in k.0.bytes() {
+            let idx = b as usize;
             match &cur_node.children[idx] {
                 Some(node) => cur_node = node.as_ref(),
                 None => return None,
@@ -38,13 +38,12 @@ impl<V> Map<V> {
 }
 
 #[derive(Clone)]
-struct Key(String);
+struct Key<'a>(&'a str);
 
-impl Key {
+impl<'a> Key<'a> {
     // creating keys longer than KEYLEN will result in an error
     // this is how we can guarantee "constant time" get() and put()
-    fn new<S: Into<String>>(s: S) -> Result<Self, &'static str> {
-        let s = s.into();
+    fn new(s: &'a str) -> Result<Self, &'static str> {
         if s.len() > KEYLEN {
             return Err("Key is too big");
         }
@@ -81,9 +80,10 @@ fn main() {
     // insert 1M entries
     let mut map = Map::new();
     for i in 0..1_000_000 {
-        let k = Key::new(i.to_string()).unwrap();
+        let s = i.to_string();
+        let k = Key::new(&s).unwrap();
         let v = i;
-        map.put(k, v);
+        map.put(&k, v);
     }
 
     // request one
@@ -99,8 +99,17 @@ mod test {
     #[test]
     fn key_too_big() {
         let bigstr = String::from_utf8(vec!['a' as u8; 129]).unwrap();
-        let k = Key::new(bigstr);
+        let k = Key::new(&bigstr);
         assert!(k.is_err());
+    }
+
+    #[test]
+    fn test_get_empty() {
+        let map = Map::<i32>::new();
+
+        let k = Key::new("red").unwrap();
+        let result = map.get(&k);
+        assert!(result.is_none());
     }
 
     #[test]
@@ -109,7 +118,7 @@ mod test {
 
         let k = Key::new("").unwrap();
         let v = 42;
-        map.put(k.clone(), v);
+        map.put(&k, v);
 
         let result = map.get(&k).unwrap();
         assert_eq!(*result, 42);
@@ -121,7 +130,10 @@ mod test {
 
         let k = Key::new("red").unwrap();
         let v = 42;
-        map.put(k.clone(), v);
+        map.put(&k, v);
+
+        let result = map.get(&k).unwrap();
+        assert_eq!(*result, 42);
 
         let result = map.get(&k).unwrap();
         assert_eq!(*result, 42);
@@ -133,14 +145,18 @@ mod test {
 
         let k = Key::new("red").unwrap();
         let v = 42;
-        map.put(k, v);
+        map.put(&k, v);
 
         let k = Key::new("green").unwrap();
         let v = 21;
-        map.put(k, v);
+        map.put(&k, v);
 
         let k = Key::new("red").unwrap();
         let result = map.get(&k).unwrap();
         assert_eq!(*result, 42);
+
+        let k = Key::new("blue").unwrap();
+        let result = map.get(&k);
+        assert!(result.is_none());
     }
 }
