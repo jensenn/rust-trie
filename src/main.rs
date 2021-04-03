@@ -1,35 +1,31 @@
 const KEYLEN: usize = 128;
 
 struct Map<V> {
-    head: Node<V>,
+    root: Node<V>,
 }
 
 impl<V> Map<V> {
     fn new() -> Self {
         Self {
-            head: Node::<V>::default(),
+            root: Node::<V>::default(),
         }
     }
 
     fn put(&mut self, k: &Key, v: V) {
-        let mut cur_node = &mut self.head;
-        for b in k.0.bytes() {
-            let idx = b as usize;
-            if cur_node.children[idx].is_none() {
-                let new_node = Node::<V>::default();
-                cur_node.children[idx] = Some(Box::new(new_node));
-            }
-            cur_node = cur_node.children[idx].as_mut().unwrap()
+        let mut cur_node = &mut self.root;
+        for idx in k.0.bytes() {
+            cur_node = cur_node.get_or_add_child(idx);
         }
         (*cur_node).value = Some(Box::new(v));
     }
 
     fn get<'a>(&'a self, k: &Key) -> Option<&'a V> {
-        let mut cur_node = &self.head;
-        for b in k.0.bytes() {
-            let idx = b as usize;
-            match &cur_node.children[idx] {
-                Some(node) => cur_node = node.as_ref(),
+        let mut cur_node = &self.root;
+        for idx in k.0.bytes() {
+            match cur_node.get_child(idx) {
+                Some(child) => {
+                    cur_node = child;
+                }
                 None => return None,
             }
         }
@@ -38,12 +34,13 @@ impl<V> Map<V> {
 }
 
 #[derive(Clone)]
-struct Key<'a>(&'a str);
+struct Key(String);
 
-impl<'a> Key<'a> {
+impl Key {
     // creating keys longer than KEYLEN will result in an error
     // this is how we can guarantee "constant time" get() and put()
-    fn new(s: &'a str) -> Result<Self, &'static str> {
+    fn new<S: Into<String>>(s: S) -> Result<Self, &'static str> {
+        let s = s.into();
         if s.len() > KEYLEN {
             return Err("Key is too big");
         }
@@ -52,44 +49,86 @@ impl<'a> Key<'a> {
 }
 
 struct Node<V> {
+    // in Rust, Option<Box>> is a nullable pointer
+    // A node may or may not hold a value
     value: Option<Box<V>>,
-    children: [Option<Box<Node<V>>>; 256],
+    // Children is an array of 256 pointers to other nodes
+    // A node may or may not have children, saving allocation on leaf nodes
+    children: Option<Box<[Option<Box<Node<V>>>; 256]>>,
 }
 
 impl<V> Default for Node<V> {
     fn default() -> Self {
-        // This is a sharp edge of Rust. This is how you create an array of NULL pointers
-        let children = {
-            let mut data: [std::mem::MaybeUninit<Option<Box<Node<V>>>>; 256] =
-                unsafe { std::mem::MaybeUninit::uninit().assume_init() };
-            for elem in &mut data[..] {
-                unsafe {
-                    std::ptr::write(elem.as_mut_ptr(), None);
-                }
-            }
-            unsafe { std::mem::transmute::<_, [Option<Box<Node<V>>>; 256]>(data) }
-        };
         Self {
             value: None,
-            children,
+            children: None,
         }
     }
 }
 
+impl<V> Node<V> {
+    fn get_child(&self, idx: u8) -> Option<&Node<V>> {
+        if self.children.is_none() {
+            return None;
+        }
+        let child = &self.children.as_ref().unwrap()[idx as usize];
+        if child.is_none() {
+            return None;
+        }
+        child.as_ref().map(|x| x.as_ref())
+    }
+
+    fn get_or_add_child(&mut self, idx: u8) -> &mut Node<V> {
+        let ch = self.children.get_or_insert_with(new_child_array);
+        ch[idx as usize].get_or_insert_with(|| {
+            Box::new(Node {
+                value: None,
+                children: None,
+            })
+        })
+    }
+}
+
+fn new_child_array<V>() -> Box<[Option<Box<Node<V>>>; 256]> {
+    // This is a sharp edge of Rust. This is how you create an array of NULL pointers
+    let children = {
+        let mut data: [std::mem::MaybeUninit<Option<Box<Node<V>>>>; 256] =
+            unsafe { std::mem::MaybeUninit::uninit().assume_init() };
+        for elem in &mut data[..] {
+            unsafe {
+                std::ptr::write(elem.as_mut_ptr(), None);
+            }
+        }
+        unsafe { std::mem::transmute::<_, [Option<Box<Node<V>>>; 256]>(data) }
+    };
+    Box::new(children)
+}
+
 fn main() {
-    // insert 1M entries
+    const ITERATIONS: i32 = 50_000_000;
+
+    // push
     let mut map = Map::new();
-    for i in 0..1_000_000 {
+    for i in 0..ITERATIONS {
+        if i % 10_000_000 == 0 {
+            println!("{}", i);
+        }
         let s = i.to_string();
         let k = Key::new(&s).unwrap();
         let v = i;
         map.put(&k, v);
     }
 
-    // request one
-    let k = Key::new("42").unwrap();
-    let result = map.get(&k).unwrap();
-    assert_eq!(*result, 42);
+    // get
+    for i in 0..ITERATIONS {
+        if i % 10_000_000 == 0 {
+            println!("{}", i);
+        }
+        let s = i.to_string();
+        let k = Key::new(&s).unwrap();
+        let result = map.get(&k).unwrap();
+        assert_eq!(*result, i);
+    }
 }
 
 #[cfg(test)]

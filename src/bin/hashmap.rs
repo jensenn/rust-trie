@@ -18,16 +18,26 @@ impl Key {
 }
 
 fn main() {
-    // insert 1M entries
+    const ITERATIONS: i32 = 50_000_000;
+
+    // push
     let mut map = BTreeMap::new();
-    for i in 0..1_000_000 {
+    for i in 0..ITERATIONS {
+        if i % 10_000_000 == 0 {
+            println!("{}", i);
+        }
         let k = Key::new(i.to_string()).unwrap();
         let v = i;
         map.insert(k, v);
     }
 
-    // request one
-    let k = Key::new("42").unwrap();
-    let result = map.get(&k).unwrap();
-    assert_eq!(*result, 42);
+    // get
+    for i in 0..ITERATIONS {
+        if i % 10_000_000 == 0 {
+            println!("{}", i);
+        }
+        let k = Key::new(i.to_string()).unwrap();
+        let result = map.get(&k).unwrap();
+        assert_eq!(*result, i);
+    }
 }
